@@ -1,4 +1,4 @@
-# Bioif Pproject 2 - Bioinformatic Analysis
+# Project 2 - Bioinformatic Analysis
 The second project in a pair from the BIOINF_B course at FIIT
 
 ##Task
