@@ -1,0 +1,169 @@
+1. Raw Data Quality Control: Assess the quality of the raw sequencing data.
+
+fastqc data/P8.C_R1.fastq.gz data/P8.C_R2.fastq.gz data/P8.T_R1.f
+astq.gz data/P8.T_R2.fastq.gz -o qc/ -t 4
+
+
+2. Read Alignment: Align the sequencing reads to the human reference genome.
+
+(bioenv) eakosh@lena:~/bioinf/bioinformatics/project2$ zcat data/P8.C_R1.fastq.gz | grep "^@" | head -n 1
+@HWI-ST1393:198:C38BWACXX:6:1101:1331:67971
+(bioenv) eakosh@lena:~/bioinf/bioinformatics/project2$ zcat data/P8.T_R1.fastq.gz | grep "^@" | head -n 1
+@HWI-ST1393:198:C38BWACXX:6:1101:1331:92034
+
+
+
+Control
+ID_C="C38BWACXX.6.P8C"
+SM_C="P8.C"
+PL="ILLUMINA"
+LB_C="C38BWACXX.P8C"
+PU_C="HWI-ST1393.198.C38BWACXX"
+CN="FIITSTU"
+DT="2026-04-15T00:00:00"
+
+RG_C="@RG\tID:${ID_C}\tSM:${SM_C}\tPL:${PL}\tLB:${LB_C}\tPU:${PU_C}\tCN:${CN}\tDT:${DT}"
+
+Tumor
+ID_T="C38BWACXX.6.P8T"
+SM_T="P8.T"
+LB_T="C38BWACXX.P8T"
+
+RG_T="@RG\tID:${ID_T}\tSM:${SM_T}\tPL:${PL}\tLB:${LB_T}\tPU:${PU_C}\tCN:${CN}\tDT:${DT}"
+
+
+
+
+bwa mem -t 8 -R "$RG_C" hg38.fa data/P8.C_R1.fastq.gz data/P8.C_R2.fastq.gz | samtools view -hbS -o alignment/P8.C.bwa.bam -
+
+samtools sort -o alignment/P8.C.bwa.sorted.bam alignment/P8.C.bwa.bam
+
+samtools sort -o alignment/P8.C.bwa.sorted.bam alignment/P8.C.bwa.bam
+
+
+
+
+bwa mem -t 8 -R "$RG_T" hg38.fa data/P8.T_R1.fastq.gz data/P8.T_R
+2.fastq.gz | samtools view -hbS -o alignment/P8.T.bwa.bam -
+
+
+
+data/P8.T_R1.fastq.gz | echo $((wc -l/4))
+zcat data/P8.T_R2.fastq.gz | echo $((wc -l/4))
+28157941
+28013781
+
+
+seqkit pair -1 data/P8.T_R1.fastq.gz -2 data/P8.T_R2.fastq.gz -o data/paired
+
+bwa mem -t 8 -R "$RG_T" hg38.fa data/P8.T_R1.paired.fastq.gz data
+/P8.T_R2.paired.fastq.gz | samtools view -hbS -o alignment/P8.T.bwa.bam -
+
+samtools sort -o alignment/P8.T.bwa.sorted.bam alignment/P8.T.bwa.bam
+
+samtools index alignment/P8.T.bwa.sorted.bam
+
+
+3. Postprocessing: Clean and prepare the aligned reads for variant calling.
+
+
+gatk MarkDuplicates -I alignment/P8.C.bwa.sorted.bam -O postprocessing/P8.C.dedup.bam -M postprocessing/P8.C.dup_metrics.txt --CREATE_INDEX true
+
+gatk MarkDuplicates -I alignment/P8.T.bwa.sorted.bam -O postproce
+ssing/P8.T.dedup.bam -M postprocessing/P8.T.dup_metrics.txt --CREATE_INDEX true
+
+gatk BaseRecalibrator -R hg38.fa -I postprocessing/P8.C.dedup.bam --known-sites postprocessing/dbsnp.chr.vcf.gz -O postprocessing/P8.C.recal_data.recalib
+
+gatk BaseRecalibrator -R hg38.fa -I postprocessing/P8.T.dedup.bam
+ --known-sites postprocessing/dbsnp.chr.vcf.gz -O postprocessing/P8.T.recal_data.recalib
+
+gatk ApplyBQSR -R hg38.fa -I postprocessing/P8.C.dedup.bam --bqsr-recal-file postprocessing/P8.C.recal_data.recalib -O postprocessing/P8.C.cleaned.bam
+
+gatk ApplyBQSR -R hg38.fa -I postprocessing/P8.T.dedup.bam --bqsr-recal-file postprocessing/P8.T.recal_data.recalib -O postprocessing/P8.T.cleaned.bam
+
+
+
+4. Post-Alignment Quality Control: Evaluate the quality of the aligned reads.
+
+
+gatk CollectAlignmentSummaryMetrics -R ~/bioinf/bioinformatics/project2/hg38.fa -I postprocessing/P8.C.cleaned.bam -O qc/P8.C.alignment_metrics.txt
+
+gatk CollectAlignmentSummaryMetrics -R ~/bioinf/bioinformatics/project2/hg38.fa -I postprocessing/P8.T.cleaned.bam -O qc/P8.T.alignment_metrics.txt
+
+samtools flagstat postprocessing/P8.C.cleaned.bam > qc/P8.C.flagstat.txt
+
+samtools flagstat postprocessing/P8.T.cleaned.bam > qc/P8.T.flagstat.txt
+
+qualimap bamqc -bam postprocessing/P8.C.cleaned.bam -outdir qc/qu
+alimap_P8.C
+
+qualimap bamqc -bam postprocessing/P8.T.cleaned.bam -outdir qc/qualimap_P8.T
+
+
+
+
+5. Variant Calling: Identify somatic SNVs, indels, structural variants, and copy number variations.
+
+
+NORMAL_SAMPLE=$(samtools samples postprocessing/P8.C.cleaned.bam | cut -f1)
+
+gatk Mutect2 -R hg38.fa -I postprocessing/P8.T.cleaned.bam -I pos
+tprocessing/P8.C.cleaned.bam -normal $NORMAL_SAMPLE -O variant_calling/P8.Tumor_Control.vcf.gz
+
+gatk FilterMutectCalls -R hg38.fa -V variant_calling/P8.Tumor_Control.vcf.gz -O variant_calling/P8.Tumor_Control.filtered.vcf.gz
+
+sudo docker run --rm -v "$(pwd):/data" -v "/home/eakosh/bioinf/hg:/ref" quay.io/biocontainers/manta:1.6.0--py27_0 configManta.py --normalBam /data/postprocessing/P8.C.cleaned.bam --tumorBam /data/postprocessing/P8.T.cleaned.bam --referenceFasta /ref/hg38.fa --runDir /data/variant_calling/manta_somatic
+
+sudo docker run --rm \
+    -v "$(pwd):/data" \
+    -v "/home/eakosh/bioinf/hg:/ref" \
+    quay.io/biocontainers/manta:1.6.0--py27_0 \
+    /data/variant_calling/manta_somatic/runWorkflow.py -m local -j 4
+
+
+delly call -g hg38.fa -o variant_calling/P8.Tumor_Control.delly.bcf postprocessing/P8.T.cleaned.bam postprocessing/P8.C.cleaned.bam
+
+TUMOR_SAMPLE=$(samtools samples postprocessing/P8.T.cleaned.bam | cut -f1)
+NORMAL_SAMPLE=$(samtools samples postprocessing/P8.C.cleaned.bam | cut -f1)
+
+echo -e "${TUMOR_SAMPLE}\ttumor\n${NORMAL_SAMPLE}\tcontrol" > variant_calling/sample_map.tsv
+
+delly filter -f somatic -o variant_calling/P8.Tumor_Control.delly.filtered.bcf -s variant_calling/sample_map.tsv variant_calling/P8.Tumor_Control.delly.bcf
+
+
+
+6. Post-Processing and Annotation: Filter and annotate the identified variants, and select those relevant to cancer.
+
+/////////////////
+(bioenv) eakosh@lena:~/bioinf/bioinformatics/project2$ bcftools view -f PASS variant_calling/P8.Tumor_Control.filtered.vcf.gz | bcftools stats | grep "^SN"
+SN      0       number of samples:      2
+SN      0       number of records:      176
+SN      0       number of no-ALTs:      0
+SN      0       number of SNPs: 151
+SN      0       number of MNPs: 12
+SN      0       number of indels:       13
+SN      0       number of others:       0
+SN      0       number of multiallelic sites:   0
+SN      0       number of multiallelic SNP sites:       0
+/////////////////
+
+bcftools filter -i 'FILTER="PASS" && FORMAT/DP>10' variant_callin
+g/P8.Tumor_Control.filtered.vcf.gz -Oz -o annotation/P8.filtered.pass.vcf.gz
+
+bcftools index annotation/P8.filtered.pass.vcf.gz
+
+/////////////////////
+(bioenv) eakosh@lena:~/bioinf/bioinformatics/project2$ bcftools stats annotation/P8.filtered.pass.vcf.gz | grep "^SN"
+SN      0       number of samples:      2
+SN      0       number of records:      173
+SN      0       number of no-ALTs:      0
+SN      0       number of SNPs: 149
+SN      0       number of MNPs: 12
+SN      0       number of indels:       12
+SN      0       number of others:       0
+SN      0       number of multiallelic sites:   0
+SN      0       number of multiallelic SNP sites:       0
+/////////////////////
+
+
+
