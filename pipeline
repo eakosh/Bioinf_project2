@@ -32,7 +32,7 @@ samtools sort -o alignment/P8.C.bwa.sorted.bam alignment/P8.C.bwa.bam
 
 samtools index alignment/P8.C.bwa.sorted.bam
 
-
+# R1 and R2 read pairs were found to be out of sync, so we synchronized them
 seqkit pair -1 data/P8.T_R1.fastq.gz -2 data/P8.T_R2.fastq.gz -o data/paired
 
 bwa mem -t 8 -R "$RG_T" hg38.fa data/P8.T_R1.paired.fastq.gz data
