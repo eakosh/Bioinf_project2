@@ -23,35 +23,27 @@ LB_T="C38BWACXX.P8T"
 RG_T="@RG\tID:${ID_T}\tSM:${SM_T}\tPL:${PL}\tLB:${LB_T}\tPU:${PU_C}\tCN:${CN}\tDT:${DT}"
 
 bwa mem -t 8 -R "$RG_C" hg38.fa data/P8.C_R1.fastq.gz data/P8.C_R2.fastq.gz | samtools view -hbS -o alignment/P8.C.bwa.bam -
-
-
-
-3. Postprocessing: Clean and prepare the aligned reads for variant calling.
-
 samtools sort -o alignment/P8.C.bwa.sorted.bam alignment/P8.C.bwa.bam
-
 samtools index alignment/P8.C.bwa.sorted.bam
 
 # R1 and R2 read pairs were found to be out of sync, so we synchronized them
 seqkit pair -1 data/P8.T_R1.fastq.gz -2 data/P8.T_R2.fastq.gz -o data/paired
 
-bwa mem -t 8 -R "$RG_T" hg38.fa data/P8.T_R1.paired.fastq.gz data
-/P8.T_R2.paired.fastq.gz | samtools view -hbS -o alignment/P8.T.bwa.bam -
-
+bwa mem -t 8 -R "$RG_T" hg38.fa data/P8.T_R1.paired.fastq.gz data/P8.T_R2.paired.fastq.gz | samtools view -hbS -o alignment/P8.T.bwa.bam -
 samtools sort -o alignment/P8.T.bwa.sorted.bam alignment/P8.T.bwa.bam
-
 samtools index alignment/P8.T.bwa.sorted.bam
 
 
+
+3. Postprocessing: Clean and prepare the aligned reads for variant calling.
+
 gatk MarkDuplicates -I alignment/P8.C.bwa.sorted.bam -O postprocessing/P8.C.dedup.bam -M postprocessing/P8.C.dup_metrics.txt --CREATE_INDEX true
 
-gatk MarkDuplicates -I alignment/P8.T.bwa.sorted.bam -O postproce
-ssing/P8.T.dedup.bam -M postprocessing/P8.T.dup_metrics.txt --CREATE_INDEX true
+gatk MarkDuplicates -I alignment/P8.T.bwa.sorted.bam -O postprocessing/P8.T.dedup.bam -M postprocessing/P8.T.dup_metrics.txt --CREATE_INDEX true
 
 gatk BaseRecalibrator -R hg38.fa -I postprocessing/P8.C.dedup.bam --known-sites postprocessing/dbsnp.chr.vcf.gz -O postprocessing/P8.C.recal_data.recalib
 
-gatk BaseRecalibrator -R hg38.fa -I postprocessing/P8.T.dedup.bam
- --known-sites postprocessing/dbsnp.chr.vcf.gz -O postprocessing/P8.T.recal_data.recalib
+gatk BaseRecalibrator -R hg38.fa -I postprocessing/P8.T.dedup.bam --known-sites postprocessing/dbsnp.chr.vcf.gz -O postprocessing/P8.T.recal_data.recalib
 
 gatk ApplyBQSR -R hg38.fa -I postprocessing/P8.C.dedup.bam --bqsr-recal-file postprocessing/P8.C.recal_data.recalib -O P8.C.cleaned.bam
 
