@@ -1,0 +1,120 @@
+1. Raw Data Quality Control: Assess the quality of the raw sequencing data.
+
+fastqc data/P8.C_R1.fastq.gz data/P8.C_R2.fastq.gz data/P8.T_R1.fastq.gz data/P8.T_R2.fastq.gz -o qc/ -t 4
+
+
+
+2. Read Alignment: Align the sequencing reads to the human reference genome.
+
+ID_C="C38BWACXX.6.P8C"
+SM_C="P8.C"
+PL="ILLUMINA"
+LB_C="C38BWACXX.P8C"
+PU_C="HWI-ST1393.198.C38BWACXX"
+CN="FIITSTU"
+DT="2026-04-15T00:00:00"
+
+RG_C="@RG\tID:${ID_C}\tSM:${SM_C}\tPL:${PL}\tLB:${LB_C}\tPU:${PU_C}\tCN:${CN}\tDT:${DT}"
+
+ID_T="C38BWACXX.6.P8T"
+SM_T="P8.T"
+LB_T="C38BWACXX.P8T"
+
+RG_T="@RG\tID:${ID_T}\tSM:${SM_T}\tPL:${PL}\tLB:${LB_T}\tPU:${PU_C}\tCN:${CN}\tDT:${DT}"
+
+bwa mem -t 8 -R "$RG_C" hg38.fa data/P8.C_R1.fastq.gz data/P8.C_R2.fastq.gz | samtools view -hbS -o alignment/P8.C.bwa.bam -
+
+
+
+3. Postprocessing: Clean and prepare the aligned reads for variant calling.
+
+samtools sort -o alignment/P8.C.bwa.sorted.bam alignment/P8.C.bwa.bam
+
+samtools index alignment/P8.C.bwa.sorted.bam
+
+
+seqkit pair -1 data/P8.T_R1.fastq.gz -2 data/P8.T_R2.fastq.gz -o data/paired
+
+bwa mem -t 8 -R "$RG_T" hg38.fa data/P8.T_R1.paired.fastq.gz data
+/P8.T_R2.paired.fastq.gz | samtools view -hbS -o alignment/P8.T.bwa.bam -
+
+samtools sort -o alignment/P8.T.bwa.sorted.bam alignment/P8.T.bwa.bam
+
+samtools index alignment/P8.T.bwa.sorted.bam
+
+
+gatk MarkDuplicates -I alignment/P8.C.bwa.sorted.bam -O postprocessing/P8.C.dedup.bam -M postprocessing/P8.C.dup_metrics.txt --CREATE_INDEX true
+
+gatk MarkDuplicates -I alignment/P8.T.bwa.sorted.bam -O postproce
+ssing/P8.T.dedup.bam -M postprocessing/P8.T.dup_metrics.txt --CREATE_INDEX true
+
+gatk BaseRecalibrator -R hg38.fa -I postprocessing/P8.C.dedup.bam --known-sites postprocessing/dbsnp.chr.vcf.gz -O postprocessing/P8.C.recal_data.recalib
+
+gatk BaseRecalibrator -R hg38.fa -I postprocessing/P8.T.dedup.bam
+ --known-sites postprocessing/dbsnp.chr.vcf.gz -O postprocessing/P8.T.recal_data.recalib
+
+gatk ApplyBQSR -R hg38.fa -I postprocessing/P8.C.dedup.bam --bqsr-recal-file postprocessing/P8.C.recal_data.recalib -O P8.C.cleaned.bam
+
+gatk ApplyBQSR -R hg38.fa -I postprocessing/P8.T.dedup.bam --bqsr-recal-file postprocessing/P8.T.recal_data.recalib -O P8.T.cleaned.bam
+
+
+
+4. Post-Alignment Quality Control: Evaluate the quality of the aligned reads.
+
+gatk CollectAlignmentSummaryMetrics -R hg38.fa -I P8.C.cleaned.bam -O qc/P8.C.alignment_metrics.txt
+
+gatk CollectAlignmentSummaryMetrics -R hg38.fa -I P8.T.cleaned.bam -O qc/P8.T.alignment_metrics.txt
+
+samtools flagstat P8.C.cleaned.bam > qc/P8.C.flagstat.txt
+
+samtools flagstat P8.T.cleaned.bam > qc/P8.T.flagstat.txt
+
+qualimap bamqc -bam P8.C.cleaned.bam -outdir qc/qualimap_P8.C
+
+qualimap bamqc -bam P8.T.cleaned.bam -outdir qc/qualimap_P8.T
+
+
+
+5. Variant Calling: Identify somatic SNVs, indels, structural variants, and copy number variations.
+
+TUMOR_SAMPLE=$(samtools samples P8.T.cleaned.bam | cut -f1)
+NORMAL_SAMPLE=$(samtools samples P8.C.cleaned.bam | cut -f1)
+
+gatk Mutect2 -R hg38.fa -I P8.T.cleaned.bam -I P8.C.cleaned.bam -normal $NORMAL_SAMPLE -O tumor_control.vcf.gz
+gatk FilterMutectCalls -R hg38.fa -V Tumor_Control.vcf.gz -O tumor_control.filtered.vcf.gz
+
+
+
+6. Post-Processing and Annotation: Filter and annotate the identified variants, and select those relevant to cancer.
+
+bcftools view -f PASS tumor_control.filtered.vcf.gz -o clean.vcf
+
+# here we used the VEP web interface to annotate clean.vcf
+
+# convert CR line breaks
+tr '\r' '\n' < annotated.vcf > fixed.vcf; rm annotated.vcf; mv fixed.vcf annotated.vcf
+
+vcf2maf.pl --input-vcf annotated.vcf --output-maf annotated.maf  --tumor-id $TUMOR_SAMPLE --normal-id $NORMAL_SAMPLE --ref-fasta hg38/hg38.fa --inhibit-vep --ncbi-build GRCh38
+
+# produce plots in R
+> maf <- read.maf("annotated.maf")
+> plotmafSummary(maf = maf, addStat = 'median')
+> oncoplot(maf, top = 20)
+> maf.titv <- titv(maf = maf, plot = FALSE)
+> plotTiTv(res = maf.titv)
+> rainfallPlot(maf = maf)
+>
+> # selecting high-impact variants
+> maf_impact <- subsetMaf(maf,
+  query = "Variant_Classification %in% c(
+    'Nonstop_Mutation',
+    'Nonsense_Mutation',
+    'Frame_Shift_Del',
+    'Frame_Shift_Ins',
+    'Splice_Site',
+    'Translation_Start_Site',
+    'Missense_Mutation'
+  )")
+> # filtering out common variants (AF < 0.01)
+> maf_rare <- subsetMaf(maf_impact,
+  query = "gnomADe_AF < 0.01 | is.na(gnomADe_AF)")
